@@ -1,6 +1,8 @@
 package com.kuza.app.presentation
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +20,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -55,6 +58,13 @@ fun ChatScreen(viewModel: ChatViewModel) {
             ) {
                 items(state.messages, key = { it.id }) { Bubble(it) }
                 if (state.friendTyping) item(key = "typing") { TypingBubble() }
+            }
+            // Week 2: chips sit between the thread and the keyboard, where a thumb already is.
+            if (state.suggestions.isNotEmpty()) {
+                SuggestionRow(
+                    suggestions = state.suggestions,
+                    onPick = { viewModel.onIntent(ChatIntent.PickSuggestion(it)) },
+                )
             }
             Composer(
                 draft = state.draft,
@@ -99,6 +109,21 @@ private fun TypingBubble() {
                 .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(18.dp))
                 .padding(horizontal = 14.dp, vertical = 10.dp),
         ) { Text("...", style = MaterialTheme.typography.bodyLarge) }
+    }
+}
+
+@Composable
+private fun SuggestionRow(suggestions: List<String>, onPick: (String) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        suggestions.forEach { text ->
+            SuggestionChip(onClick = { onPick(text) }, label = { Text(text) })
+        }
     }
 }
 

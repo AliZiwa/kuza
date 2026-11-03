@@ -39,6 +39,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.kotlinx.coroutines.android)
 
+    // Week 2: classic on-device ML. No LLM, no network, English only.
+    implementation(libs.mlkit.smart.reply)
+    implementation(libs.kotlinx.coroutines.play.services)
+
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)

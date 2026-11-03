@@ -6,6 +6,8 @@ import com.kuza.app.domain.Author
 import com.kuza.app.domain.Message
 import com.kuza.app.domain.Replier
 import com.kuza.app.domain.ScriptedFriend
+import com.kuza.app.domain.NoSuggestions
+import com.kuza.app.domain.Suggester
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,11 +21,15 @@ data class ChatState(
     val messages: List<Message> = emptyList(),
     val draft: String = "",
     val friendTyping: Boolean = false,
+    /** Week 2: short replies you could tap instead of typing. Empty means no chips. */
+    val suggestions: List<String> = emptyList(),
 )
 
 sealed interface ChatIntent {
     data class DraftChanged(val text: String) : ChatIntent
     data object Send : ChatIntent
+    /** Week 2: a chip was tapped. The text is sent as if you had typed it. */
+    data class PickSuggestion(val text: String) : ChatIntent
 }
 
 /**
@@ -33,6 +39,7 @@ sealed interface ChatIntent {
  */
 class ChatViewModel(
     private val replier: Replier = ScriptedFriend(),
+    private val suggester: Suggester = NoSuggestions,
     private val typingBeatMs: Long = 900,
     private val clock: () -> Long = System::currentTimeMillis,
     private val io: CoroutineDispatcher = Dispatchers.Default,
@@ -42,20 +49,24 @@ class ChatViewModel(
     val state: StateFlow<ChatState> = _state
 
     private var replyJob: Job? = null
+    private var suggestJob: Job? = null
     private var nextId = 1L
 
     fun onIntent(intent: ChatIntent) {
         when (intent) {
             is ChatIntent.DraftChanged -> _state.update { it.copy(draft = intent.text) }
-            ChatIntent.Send -> send()
+            ChatIntent.Send -> send(_state.value.draft)
+            is ChatIntent.PickSuggestion -> send(intent.text)
         }
     }
 
-    private fun send() {
-        val text = _state.value.draft.trim()
+    private fun send(raw: String) {
+        val text = raw.trim()
         if (text.isEmpty()) return
         append(Author.You, text)
-        _state.update { it.copy(draft = "") }
+        // Chips answer the friend's last line. Once you have answered it, they are stale.
+        suggestJob?.cancel()
+        _state.update { it.copy(draft = "", suggestions = emptyList()) }
 
         // A reply composed before this message landed would be answering the wrong thing.
         replyJob?.cancel()
@@ -64,8 +75,25 @@ class ChatViewModel(
             delay(typingBeatMs)
             val line = replier.reply(_state.value.messages)
             _state.update { it.copy(friendTyping = false) }
-            if (line != null) append(Author.Friend, line)
+            if (line != null) {
+                append(Author.Friend, line)
+                suggest()
+            }
         }
+    }
+
+    /** Week 2: after the friend speaks, ask the suggester what you might say back. */
+    private fun suggest() {
+        suggestJob?.cancel()
+        suggestJob = viewModelScope.launch(io) {
+            val chips = suggester.suggest(_state.value.messages)
+            _state.update { it.copy(suggestions = chips) }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        (suggester as? AutoCloseable)?.close()
     }
 
     private fun append(author: Author, text: String) {

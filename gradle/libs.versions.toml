@@ -9,6 +9,8 @@ lifecycle = "2.10.0"
 composeBom = "2026.09.00"
 coroutines = "1.11.0"
 junit = "4.13.2"
+# Week 2: ML Kit Smart Reply, bundled model (about 5.7 MB), last updated to 17.0.4 in Aug 2024.
+mlkitSmartReply = "17.0.4"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -24,6 +26,10 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+# Week 2: Task.await() for the Play Services Task that ML Kit returns.
+kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutines" }
+
+mlkit-smart-reply = { group = "com.google.mlkit", name = "smart-reply", version.ref = "mlkitSmartReply" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 
