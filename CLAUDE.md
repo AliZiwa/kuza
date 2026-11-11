@@ -1,0 +1,1 @@
+Fast check the reviewer may run, from the repo root: ./gradlew :app:testDebugUnitTest --console=plain
