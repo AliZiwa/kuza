@@ -31,16 +31,9 @@ jobs:
         with:
           # Full history so the skill can diff against the base branch and read commits.
           fetch-depth: 0
-
-      # Optional: install the toolchains the skill may use to run the repo's own fast checks.
-      # Uncomment the ones your repo uses. Keep the step cheap; the review should not become CI.
-      # - uses: actions/setup-java@v4
-      #   with: { distribution: temurin, java-version: '21' }
-      # - uses: actions/setup-python@v5
-      #   with: { python-version: '3.12' }
-      # - uses: actions/setup-node@v4
-      #   with: { node-version: '22' }
-
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - uses: gradle/actions/setup-gradle@v4
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
