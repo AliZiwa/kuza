@@ -5,11 +5,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewmodel.initializer
-import androidx.lifecycle.viewmodel.viewModelFactory
-import com.kuza.app.domain.ScriptedFriend
-import com.kuza.app.ml.SmartReplySuggester
 import com.kuza.app.presentation.ChatScreen
 import com.kuza.app.presentation.ChatViewModel
 import com.kuza.app.presentation.KuzaTheme
