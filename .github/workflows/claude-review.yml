@@ -38,17 +38,11 @@ jobs:
           private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21' }
-      - uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ steps.app-token.outputs.token }}
-          prompt: "/staff-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
-          claude_args: |
-            ...unchanged...
       - uses: gradle/actions/setup-gradle@v4
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ steps.app-token.outputs.token }}
           prompt: "/principal-engineer-pr-reviewer ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
           claude_args: |
             --max-turns 60
