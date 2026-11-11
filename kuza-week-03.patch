@@ -1,0 +1,748 @@
+From 6b08172625d7a8a5468db3070798b3b34030bead Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 7 Nov 2026 00:52:25 +0000
+Subject: [PATCH 1/2] Week 3: ML Kit GenAI Summarization of the thread behind a
+ Summarizer seam.
+
+Gemini Nano via AICore summarizes the chat into up to three bullets. Closed Summary
+outcomes, SummaryRules gates (head trimming under the 4000 token cap, bullet parsing),
+unit tests, README section with device requirements. Compile verification on Ali's machine.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GqRwXrMvaq189FNZu3A6jo
+---
+ README.md                                     |  49 ++++++++
+ app/build.gradle.kts                          |   4 +
+ .../main/java/com/kuza/app/MainActivity.kt    |   8 +-
+ .../java/com/kuza/app/domain/Summarizer.kt    |  93 +++++++++++++++
+ .../com/kuza/app/ml/GeminiNanoSummarizer.kt   | 108 ++++++++++++++++++
+ .../com/kuza/app/presentation/ChatScreen.kt   |  42 ++++++-
+ .../kuza/app/presentation/ChatViewModel.kt    |  30 +++++
+ .../com/kuza/app/domain/SummaryRulesTest.kt   |  63 ++++++++++
+ .../app/presentation/ChatViewModelTest.kt     |  27 +++++
+ gradle/libs.versions.toml                     |   6 +
+ 10 files changed, 428 insertions(+), 2 deletions(-)
+ create mode 100644 app/src/main/java/com/kuza/app/domain/Summarizer.kt
+ create mode 100644 app/src/main/java/com/kuza/app/ml/GeminiNanoSummarizer.kt
+ create mode 100644 app/src/test/java/com/kuza/app/domain/SummaryRulesTest.kt
+
+diff --git a/README.md b/README.md
+index ac40625..0695dcb 100644
+--- a/README.md
++++ b/README.md
+@@ -59,3 +59,52 @@ plumbing; compile verification is on Ali's machine before the tag.
+ ```bash
+ ./gradlew :app:testDebugUnitTest     # SuggestionRulesTest, ChatViewModelTest, ScriptedFriendTest
+ ```
++
++## Week 3: the borrowed model
++
++One tap in the top bar and the thread gets summarized into up to three bullets by Gemini Nano,
++the first language model in the app. It is also the first model the app does not own: it lives in
++AICore, an Android system service, and every app on the phone shares the same copy.
++
++```
++app/src/main/java/com/kuza/app
++├── MainActivity.kt                 now also hands the ViewModel a Summarizer
++├── domain/
++│   └── Summarizer.kt               the third seam, Summary (a closed set of five outcomes),
++│                                   SummaryLength, and SummaryRules (the two gates)
++├── ml/
++│   └── GeminiNanoSummarizer.kt     ML Kit GenAI Summarization behind the seam
++└── presentation/
++    ├── ChatViewModel.kt            summary and summarizing in ChatState, Summarize and DismissSummary intents
++    └── ChatScreen.kt               a Summarize action in the top bar and a SummaryCard above the chips
++```
++
++What changed in the build: `com.google.mlkit:genai-summarization:1.0.0-beta1` (beta, no SLA, no
++deprecation policy, unchanged since its first release and still at beta1 in the Oct 26, 2026 ML Kit
++release notes) and `kotlinx-coroutines-guava`, because the GenAI APIs return Guava
++`ListenableFuture` and we want `await()`. The model itself adds nothing to the APK.
++
++Device requirements: Android 8.0+ is the floor, but the feature only runs on phones Google lists
++for the ML Kit GenAI text APIs: Pixel 9 and 10 series, Pixel 11 series, Galaxy S25 and S26 series,
++Galaxy Z Fold7, Fold8 and Flip8, plus a list of Honor, OnePlus, OPPO, POCO, realme, vivo, Xiaomi,
++Motorola, Sony and Sharp devices, and the Googlebook laptops. No Pixel 8, no Galaxy S24, no
++emulator, and no device with an unlocked bootloader. Elsewhere `checkFeatureStatus()` returns
++`UNAVAILABLE` and the card says so. The first use on a supported phone may download the feature
++through AICore; the docs do not publish the size, so the app shows the byte count AICore reports.
++English, Japanese and Korean only; the app asks for English.
++
++House rules that are not ours: inference only while the app is in the foreground
++(`BACKGROUND_USE_BLOCKED` otherwise), a per-app inference quota (`BUSY`), and a per-app daily
++battery quota (`PER_APP_BATTERY_USE_QUOTA_EXCEEDED`). Input is capped at 4000 tokens; the SDK's
++auto truncation keeps the prefix, so `SummaryRules.conversation` trims from the head itself and
++keeps the newest 12000 characters.
++
++Honest note: this week's code was written and reviewed without an Android toolchain or a Gemini
++Nano phone on the machine that wrote it. `SummaryRulesTest` and `ChatViewModelTest` cover the two
++gates and the plumbing; compile verification and the first real summary are on Ali's Pixel before
++the tag. The one thing to check first: `GenAiException.errorCode` and the `DownloadCallback`
++signatures in `GeminiNanoSummarizer`, which were written from the reference docs, not a compiler.
++
++```bash
++./gradlew :app:testDebugUnitTest     # SummaryRulesTest, SuggestionRulesTest, ChatViewModelTest, ScriptedFriendTest
++```
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index 0b566ce..118161b 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -43,6 +43,10 @@ dependencies {
+     implementation(libs.mlkit.smart.reply)
+     implementation(libs.kotlinx.coroutines.play.services)
+ 
++    // Week 3: the first language model. Gemini Nano is not in the APK; AICore owns it.
++    implementation(libs.mlkit.genai.summarization)
++    implementation(libs.kotlinx.coroutines.guava)
++
+     implementation(platform(libs.androidx.compose.bom))
+     implementation(libs.androidx.compose.ui)
+     implementation(libs.androidx.compose.ui.tooling.preview)
+diff --git a/app/src/main/java/com/kuza/app/MainActivity.kt b/app/src/main/java/com/kuza/app/MainActivity.kt
+index 1f55112..16021af 100644
+--- a/app/src/main/java/com/kuza/app/MainActivity.kt
++++ b/app/src/main/java/com/kuza/app/MainActivity.kt
+@@ -9,6 +9,7 @@ import androidx.lifecycle.ViewModelProvider
+ import androidx.lifecycle.viewmodel.initializer
+ import androidx.lifecycle.viewmodel.viewModelFactory
+ import com.kuza.app.domain.ScriptedFriend
++import com.kuza.app.ml.GeminiNanoSummarizer
+ import com.kuza.app.ml.SmartReplySuggester
+ import com.kuza.app.presentation.ChatScreen
+ import com.kuza.app.presentation.ChatViewModel
+@@ -18,10 +19,15 @@ class MainActivity : ComponentActivity() {
+ 
+     // Week 1: the friend reads from a script. This is the only line that changes in week 4.
+     // Week 2: the phone suggests your side of the chat with ML Kit Smart Reply. The friend is unchanged.
++    // Week 3: Gemini Nano, borrowed from AICore, summarizes the thread. The friend is still unchanged.
+     private val viewModel: ChatViewModel by viewModels {
+         viewModelFactory {
+             initializer {
+-                ChatViewModel(replier = ScriptedFriend(), suggester = SmartReplySuggester())
++                ChatViewModel(
++                    replier = ScriptedFriend(),
++                    suggester = SmartReplySuggester(),
++                    summarizer = GeminiNanoSummarizer(applicationContext),
++                )
+             }
+         }
+     }
+diff --git a/app/src/main/java/com/kuza/app/domain/Summarizer.kt b/app/src/main/java/com/kuza/app/domain/Summarizer.kt
+new file mode 100644
+index 0000000..2b8df59
+--- /dev/null
++++ b/app/src/main/java/com/kuza/app/domain/Summarizer.kt
+@@ -0,0 +1,93 @@
++package com.kuza.app.domain
++
++/**
++ * Week 3: the third seam, and the first one that reads the whole table. A [Replier] speaks for
++ * the friend, a [Suggester] offers words to you, a [Summarizer] tells you what the thread was
++ * about. It is the first seam filled by a language model, and the screen still never learns that.
++ */
++fun interface Summarizer {
++    suspend fun summarize(transcript: List<Message>): Summary
++}
++
++/**
++ * Every answer a summarizer can give, as a closed set. The screen renders each one and nothing
++ * else. A model may fail in a hundred ways; the user gets to see five.
++ */
++sealed interface Summary {
++    /** One to three short lines, already stripped of the model's bullet markers. */
++    data class Bullets(val lines: List<String>) : Summary
++
++    /** Fewer messages than [SummaryRules.MIN_MESSAGES]. Nothing to summarize yet. */
++    data object TooShort : Summary
++
++    /** AICore says the feature is unavailable on this device. The button should not pretend. */
++    data object NotOnThisPhone : Summary
++
++    /** The model is being fetched. Ask again when it lands. [bytes] is what AICore reported. */
++    data class Downloading(val bytes: Long) : Summary
++
++    /** The model exists here and still said no. [reason] is the error code name, for the log. */
++    data class Failed(val reason: String) : Summary
++}
++
++/** Week 1 and 2 behaviour, kept as a value: the button is never shown. */
++object NoSummary : Summarizer {
++    override suspend fun summarize(transcript: List<Message>): Summary = Summary.NotOnThisPhone
++}
++
++/** How many bullets we ask for. A closed enum, mapped to the SDK constant at the edge. */
++enum class SummaryLength(val bullets: Int) { ONE(1), TWO(2), THREE(3) }
++
++/**
++ * The rules around the model, pure and tested without a device. [conversation] decides what the
++ * model may read; [parse] decides what the screen may show. The model sits between the two gates.
++ */
++object SummaryRules {
++    /** Below this a summary is a reprint. Four lines is the smallest thread with a shape. */
++    const val MIN_MESSAGES = 4
++
++    /**
++     * ML Kit GenAI Summarization accepts under 4000 tokens, about 3000 English words. We budget
++     * by characters, newest lines first, and stay well inside: 12000 characters is roughly 3000
++     * tokens of chat, where lines are short and tokens are cheap.
++     */
++    const val MAX_CHARS = 12_000
++
++    /** The names the model reads. InputType.CONVERSATION wants `<name>: <message>`, one per line. */
++    fun name(author: Author): String = when (author) {
++        Author.You -> "You"
++        Author.Friend -> "Friend"
++    }
++
++    /**
++     * The transcript as the model wants it, or null when there is not enough to summarize.
++     * Trimming happens from the head, not the tail: the SDK's auto truncation keeps the prefix,
++     * and the prefix of a chat is "hi". A summary should favour what was said last.
++     */
++    fun conversation(transcript: List<Message>): String? {
++        if (transcript.size < MIN_MESSAGES) return null
++        val lines = transcript.map { "${name(it.author)}: ${it.text.replace('\n', ' ').trim()}" }
++        var budget = MAX_CHARS
++        val kept = ArrayList<String>(lines.size)
++        for (line in lines.asReversed()) {
++            budget -= line.length + 1
++            if (budget < 0) break
++            kept += line
++        }
++        if (kept.size < MIN_MESSAGES) return null
++        return kept.asReversed().joinToString("\n")
++    }
++
++    /**
++     * The model answers in Markdown-ish bullets, one per line, each starting with "* ". We strip
++     * the markers, drop blanks, and never show more lines than we asked for, whatever came back.
++     */
++    fun parse(raw: String, length: SummaryLength): Summary {
++        val lines = raw.lineSequence()
++            .map { it.trim().trimStart('*', '-', '•').trim() }
++            .filter { it.isNotEmpty() }
++            .take(length.bullets)
++            .toList()
++        return if (lines.isEmpty()) Summary.Failed("EMPTY_RESPONSE") else Summary.Bullets(lines)
++    }
++}
+diff --git a/app/src/main/java/com/kuza/app/ml/GeminiNanoSummarizer.kt b/app/src/main/java/com/kuza/app/ml/GeminiNanoSummarizer.kt
+new file mode 100644
+index 0000000..b69236c
+--- /dev/null
++++ b/app/src/main/java/com/kuza/app/ml/GeminiNanoSummarizer.kt
+@@ -0,0 +1,108 @@
++package com.kuza.app.ml
++
++import android.content.Context
++import com.google.mlkit.genai.common.DownloadCallback
++import com.google.mlkit.genai.common.FeatureStatus
++import com.google.mlkit.genai.common.GenAiException
++import com.google.mlkit.genai.summarization.Summarization
++import com.google.mlkit.genai.summarization.SummarizationRequest
++import com.google.mlkit.genai.summarization.SummarizerOptions
++import com.google.mlkit.genai.summarization.Summarizer as NanoSummarizer
++import com.kuza.app.domain.Message
++import com.kuza.app.domain.Summary
++import com.kuza.app.domain.SummaryLength
++import com.kuza.app.domain.SummaryRules
++import com.kuza.app.domain.Summarizer
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.guava.await
++
++/**
++ * Week 3: ML Kit GenAI Summarization behind the [Summarizer] seam. The first language model in
++ * the app, and the first model the app does not own. Gemini Nano lives in AICore, an Android
++ * system service, and is shared by every app on the phone. We ask it to read the thread as a
++ * conversation and hand back up to three bullets.
++ *
++ * Artifact: com.google.mlkit:genai-summarization:1.0.0-beta1 (beta, no SLA). English, Japanese,
++ * and Korean. Supported phones only (Pixel 9 and newer, Galaxy S25 and newer, and a list of
++ * others); everywhere else [checkFeatureStatus] says UNAVAILABLE and we say [Summary.NotOnThisPhone].
++ *
++ * House rules that are not ours: inference only while the app is in the foreground, a per-app
++ * inference quota (BUSY), and a per-app daily battery quota. The landlord keeps the meter.
++ */
++class GeminiNanoSummarizer(
++    context: Context,
++    private val length: SummaryLength = SummaryLength.THREE,
++) : Summarizer, AutoCloseable {
++
++    private val client: NanoSummarizer = Summarization.getClient(
++        SummarizerOptions.builder(context)
++            .setInputType(SummarizerOptions.InputType.CONVERSATION)
++            .setOutputType(outputType(length))
++            .setLanguage(SummarizerOptions.Language.ENGLISH)
++            // Off on purpose: the SDK keeps the prefix, and SummaryRules already kept the tail.
++            .setLongInputAutoTruncationEnabled(false)
++            .build(),
++    )
++
++    override suspend fun summarize(transcript: List<Message>): Summary {
++        val text = SummaryRules.conversation(transcript) ?: return Summary.TooShort
++
++        return try {
++            when (client.checkFeatureStatus().await()) {
++                FeatureStatus.UNAVAILABLE -> return Summary.NotOnThisPhone
++                FeatureStatus.DOWNLOADABLE -> {
++                    // One-time fetch of the feature. AICore tells us the size; the docs do not.
++                    var bytes = 0L
++                    client.downloadFeature(object : DownloadCallback {
++                        override fun onDownloadStarted(bytesToDownload: Long) { bytes = bytesToDownload }
++                        override fun onDownloadProgress(totalBytesDownloaded: Long) = Unit
++                        override fun onDownloadCompleted() = Unit
++                        override fun onDownloadFailed(e: GenAiException) = Unit
++                    }).await()
++                    return Summary.Downloading(bytes)
++                }
++                FeatureStatus.DOWNLOADING -> return Summary.Downloading(bytes = -1)
++                else -> Unit // AVAILABLE
++            }
++            val result = client.runInference(SummarizationRequest.builder(text).build()).await()
++            SummaryRules.parse(result.summary, length)
++        } catch (e: CancellationException) {
++            throw e
++        } catch (e: GenAiException) {
++            when (e.errorCode) {
++                GenAiException.ErrorCode.REQUEST_TOO_SMALL -> Summary.TooShort
++                GenAiException.ErrorCode.NOT_AVAILABLE,
++                GenAiException.ErrorCode.AICORE_INCOMPATIBLE,
++                GenAiException.ErrorCode.NEEDS_SYSTEM_UPDATE -> Summary.NotOnThisPhone
++                else -> Summary.Failed(reasonName(e.errorCode))
++            }
++        } catch (e: Exception) {
++            Summary.Failed(e.javaClass.simpleName)
++        }
++    }
++
++    /** Releases the engine. The ViewModel calls this from onCleared. */
++    override fun close() = client.close()
++
++    private companion object {
++        /** The closed enum meets the SDK's int constants here and nowhere else. */
++        fun outputType(length: SummaryLength): Int = when (length) {
++            SummaryLength.ONE -> SummarizerOptions.OutputType.ONE_BULLET
++            SummaryLength.TWO -> SummarizerOptions.OutputType.TWO_BULLETS
++            SummaryLength.THREE -> SummarizerOptions.OutputType.THREE_BULLETS
++        }
++
++        /** The codes the article cares about, by name. Anything else is reported by number. */
++        fun reasonName(code: Int): String = when (code) {
++            GenAiException.ErrorCode.BUSY -> "BUSY"
++            GenAiException.ErrorCode.BACKGROUND_USE_BLOCKED -> "BACKGROUND_USE_BLOCKED"
++            GenAiException.ErrorCode.PER_APP_BATTERY_USE_QUOTA_EXCEEDED -> "BATTERY_QUOTA"
++            GenAiException.ErrorCode.REQUEST_TOO_LARGE -> "REQUEST_TOO_LARGE"
++            GenAiException.ErrorCode.NOT_ENOUGH_DISK_SPACE -> "NOT_ENOUGH_DISK_SPACE"
++            GenAiException.ErrorCode.RESPONSE_PROCESSING_ERROR,
++            GenAiException.ErrorCode.RESPONSE_GENERATION_ERROR,
++            GenAiException.ErrorCode.REQUEST_PROCESSING_ERROR -> "POLICY"
++            else -> "GENAI_$code"
++        }
++    }
++}
+diff --git a/app/src/main/java/com/kuza/app/presentation/ChatScreen.kt b/app/src/main/java/com/kuza/app/presentation/ChatScreen.kt
+index 1ec496e..4a449ec 100644
+--- a/app/src/main/java/com/kuza/app/presentation/ChatScreen.kt
++++ b/app/src/main/java/com/kuza/app/presentation/ChatScreen.kt
+@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
+ import androidx.compose.foundation.lazy.items
+ import androidx.compose.foundation.lazy.rememberLazyListState
+ import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.material3.Card
+ import androidx.compose.material3.ExperimentalMaterial3Api
+ import androidx.compose.material3.MaterialTheme
+ import androidx.compose.material3.OutlinedTextField
+@@ -33,6 +34,7 @@ import androidx.compose.ui.unit.dp
+ import androidx.lifecycle.compose.collectAsStateWithLifecycle
+ import com.kuza.app.domain.Author
+ import com.kuza.app.domain.Message
++import com.kuza.app.domain.Summary
+ 
+ @OptIn(ExperimentalMaterial3Api::class)
+ @Composable
+@@ -46,7 +48,18 @@ fun ChatScreen(viewModel: ChatViewModel) {
+     }
+ 
+     Scaffold(
+-        topBar = { TopAppBar(title = { Text("Kuza") }) },
++        topBar = {
++            TopAppBar(
++                title = { Text("Kuza") },
++                actions = {
++                    // Week 3: one tap asks a language model what the thread was about.
++                    TextButton(
++                        onClick = { viewModel.onIntent(ChatIntent.Summarize) },
++                        enabled = !state.summarizing,
++                    ) { Text(if (state.summarizing) "Reading..." else "Summarize") }
++                },
++            )
++        },
+         modifier = Modifier.imePadding(),
+     ) { padding ->
+         Column(Modifier.fillMaxSize().padding(padding)) {
+@@ -59,6 +72,10 @@ fun ChatScreen(viewModel: ChatViewModel) {
+                 items(state.messages, key = { it.id }) { Bubble(it) }
+                 if (state.friendTyping) item(key = "typing") { TypingBubble() }
+             }
++            // Week 3: the summary card sits above the chips. Every outcome has words; none is a spinner.
++            state.summary?.let { summary ->
++                SummaryCard(summary, onDismiss = { viewModel.onIntent(ChatIntent.DismissSummary) })
++            }
+             // Week 2: chips sit between the thread and the keyboard, where a thumb already is.
+             if (state.suggestions.isNotEmpty()) {
+                 SuggestionRow(
+@@ -112,6 +129,29 @@ private fun TypingBubble() {
+     }
+ }
+ 
++@Composable
++private fun SummaryCard(summary: Summary, onDismiss: () -> Unit) {
++    Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
++        Column(Modifier.padding(14.dp)) {
++            when (summary) {
++                is Summary.Bullets -> summary.lines.forEach { line ->
++                    Text("\u2022 $line", style = MaterialTheme.typography.bodyMedium)
++                }
++                Summary.TooShort -> Text("Say a few more things first.")
++                Summary.NotOnThisPhone -> Text("Gemini Nano is not available on this phone.")
++                is Summary.Downloading -> Text(
++                    if (summary.bytes > 0) "Fetching the model (${summary.bytes / 1_000_000} MB). Tap again when it lands."
++                    else "The model is still downloading. Tap again in a moment.",
++                )
++                is Summary.Failed -> Text("The model declined: ${summary.reason}.")
++            }
++            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
++                TextButton(onClick = onDismiss) { Text("Dismiss") }
++            }
++        }
++    }
++}
++
+ @Composable
+ private fun SuggestionRow(suggestions: List<String>, onPick: (String) -> Unit) {
+     Row(
+diff --git a/app/src/main/java/com/kuza/app/presentation/ChatViewModel.kt b/app/src/main/java/com/kuza/app/presentation/ChatViewModel.kt
+index 6579d2f..27d9e5d 100644
+--- a/app/src/main/java/com/kuza/app/presentation/ChatViewModel.kt
++++ b/app/src/main/java/com/kuza/app/presentation/ChatViewModel.kt
+@@ -7,7 +7,10 @@ import com.kuza.app.domain.Message
+ import com.kuza.app.domain.Replier
+ import com.kuza.app.domain.ScriptedFriend
+ import com.kuza.app.domain.NoSuggestions
++import com.kuza.app.domain.NoSummary
+ import com.kuza.app.domain.Suggester
++import com.kuza.app.domain.Summarizer
++import com.kuza.app.domain.Summary
+ import kotlinx.coroutines.CoroutineDispatcher
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.Job
+@@ -23,6 +26,10 @@ data class ChatState(
+     val friendTyping: Boolean = false,
+     /** Week 2: short replies you could tap instead of typing. Empty means no chips. */
+     val suggestions: List<String> = emptyList(),
++    /** Week 3: the thread, summarized by a model, or the reason it was not. Null means no card. */
++    val summary: Summary? = null,
++    /** Week 3: a summary is being fetched or computed. The button is disabled meanwhile. */
++    val summarizing: Boolean = false,
+ )
+ 
+ sealed interface ChatIntent {
+@@ -30,6 +37,10 @@ sealed interface ChatIntent {
+     data object Send : ChatIntent
+     /** Week 2: a chip was tapped. The text is sent as if you had typed it. */
+     data class PickSuggestion(val text: String) : ChatIntent
++    /** Week 3: the user asked what the thread was about. */
++    data object Summarize : ChatIntent
++    /** Week 3: the summary card was dismissed. */
++    data object DismissSummary : ChatIntent
+ }
+ 
+ /**
+@@ -40,6 +51,7 @@ sealed interface ChatIntent {
+ class ChatViewModel(
+     private val replier: Replier = ScriptedFriend(),
+     private val suggester: Suggester = NoSuggestions,
++    private val summarizer: Summarizer = NoSummary,
+     private val typingBeatMs: Long = 900,
+     private val clock: () -> Long = System::currentTimeMillis,
+     private val io: CoroutineDispatcher = Dispatchers.Default,
+@@ -50,6 +62,7 @@ class ChatViewModel(
+ 
+     private var replyJob: Job? = null
+     private var suggestJob: Job? = null
++    private var summaryJob: Job? = null
+     private var nextId = 1L
+ 
+     fun onIntent(intent: ChatIntent) {
+@@ -57,6 +70,8 @@ class ChatViewModel(
+             is ChatIntent.DraftChanged -> _state.update { it.copy(draft = intent.text) }
+             ChatIntent.Send -> send(_state.value.draft)
+             is ChatIntent.PickSuggestion -> send(intent.text)
++            ChatIntent.Summarize -> summarize()
++            ChatIntent.DismissSummary -> _state.update { it.copy(summary = null) }
+         }
+     }
+ 
+@@ -91,9 +106,24 @@ class ChatViewModel(
+         }
+     }
+ 
++    /**
++     * Week 3: ask the summarizer to read the whole thread. One at a time: a second tap while the
++     * first is running is ignored, because the model behind it is shared and metered.
++     */
++    private fun summarize() {
++        if (_state.value.summarizing) return
++        summaryJob?.cancel()
++        summaryJob = viewModelScope.launch(io) {
++            _state.update { it.copy(summarizing = true) }
++            val summary = summarizer.summarize(_state.value.messages)
++            _state.update { it.copy(summarizing = false, summary = summary) }
++        }
++    }
++
+     override fun onCleared() {
+         super.onCleared()
+         (suggester as? AutoCloseable)?.close()
++        (summarizer as? AutoCloseable)?.close()
+     }
+ 
+     private fun append(author: Author, text: String) {
+diff --git a/app/src/test/java/com/kuza/app/domain/SummaryRulesTest.kt b/app/src/test/java/com/kuza/app/domain/SummaryRulesTest.kt
+new file mode 100644
+index 0000000..4c94637
+--- /dev/null
++++ b/app/src/test/java/com/kuza/app/domain/SummaryRulesTest.kt
+@@ -0,0 +1,63 @@
++package com.kuza.app.domain
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++/** Week 3: the two gates around Gemini Nano, tested without a phone that has it. */
++class SummaryRulesTest {
++
++    private fun thread(vararg lines: String): List<Message> =
++        lines.mapIndexed { i, text ->
++            Message(id = i + 1L, author = if (i % 2 == 0) Author.You else Author.Friend, text = text, sentAt = i.toLong())
++        }
++
++    @Test
++    fun `too few messages is nothing to summarize`() {
++        assertNull(SummaryRules.conversation(thread("hi", "hello", "how far?")))
++    }
++
++    @Test
++    fun `the model reads name colon message, one per line, oldest first`() {
++        val text = SummaryRules.conversation(thread("hi", "hello", "lunch?", "yes, jollof"))
++        assertEquals("You: hi\nFriend: hello\nYou: lunch?\nFriend: yes, jollof", text)
++    }
++
++    @Test
++    fun `newlines inside a message are flattened so lines stay lines`() {
++        val text = SummaryRules.conversation(thread("one\ntwo", "a", "b", "c"))
++        assertEquals("You: one two", text!!.lineSequence().first())
++    }
++
++    @Test
++    fun `a long thread is trimmed from the head, never the tail`() {
++        val filler = "x".repeat(1_000)
++        val lines = List(20) { filler } + listOf("the last word")
++        val text = SummaryRules.conversation(thread(*lines.toTypedArray()))!!
++        assertTrue(text.length <= SummaryRules.MAX_CHARS)
++        assertTrue(text.endsWith("the last word"))
++        assertTrue(text.lineSequence().count() < lines.size)
++    }
++
++    @Test
++    fun `bullets lose their markers and never exceed what was asked for`() {
++        val raw = "* Lunch was agreed.\n* Jollof, not fried rice.\n* Friend pays.\n* A fourth line we did not ask for."
++        val summary = SummaryRules.parse(raw, SummaryLength.THREE)
++        assertEquals(
++            Summary.Bullets(listOf("Lunch was agreed.", "Jollof, not fried rice.", "Friend pays.")),
++            summary,
++        )
++    }
++
++    @Test
++    fun `one bullet requested means one bullet shown`() {
++        val summary = SummaryRules.parse("- first\n- second", SummaryLength.ONE)
++        assertEquals(Summary.Bullets(listOf("first")), summary)
++    }
++
++    @Test
++    fun `an empty answer is a failure with a name, not an empty card`() {
++        assertEquals(Summary.Failed("EMPTY_RESPONSE"), SummaryRules.parse("* \n\n", SummaryLength.TWO))
++    }
++}
+diff --git a/app/src/test/java/com/kuza/app/presentation/ChatViewModelTest.kt b/app/src/test/java/com/kuza/app/presentation/ChatViewModelTest.kt
+index 5375f7b..b6898c1 100644
+--- a/app/src/test/java/com/kuza/app/presentation/ChatViewModelTest.kt
++++ b/app/src/test/java/com/kuza/app/presentation/ChatViewModelTest.kt
+@@ -3,6 +3,8 @@ package com.kuza.app.presentation
+ import com.kuza.app.domain.Author
+ import com.kuza.app.domain.ScriptedFriend
+ import com.kuza.app.domain.Suggester
++import com.kuza.app.domain.Summarizer
++import com.kuza.app.domain.Summary
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.ExperimentalCoroutinesApi
+ import kotlinx.coroutines.test.StandardTestDispatcher
+@@ -28,9 +30,13 @@ class ChatViewModelTest {
+         if (last.author == Author.Friend) listOf("You said: ${last.text}") else emptyList()
+     }
+ 
++    /** Week 3: a summarizer that counts lines, so the ViewModel plumbing is visible without a model. */
++    private val counter = Summarizer { transcript -> Summary.Bullets(listOf("${transcript.size} lines")) }
++
+     private fun viewModel() = ChatViewModel(
+         replier = ScriptedFriend(lines = listOf("eh")),
+         suggester = echo,
++        summarizer = counter,
+         typingBeatMs = 0,
+         clock = { 0L },
+         io = dispatcher,
+@@ -59,4 +65,25 @@ class ChatViewModelTest {
+         assertTrue(vm.state.value.suggestions.isEmpty())
+         assertEquals("You said: eh", vm.state.value.messages.last { it.author == Author.You }.text)
+     }
++
++    @Test
++    fun `summarize puts the whole thread in front of the summarizer and the card in state`() = runTest(dispatcher) {
++        val vm = viewModel()
++        vm.onIntent(ChatIntent.DraftChanged("hello"))
++        vm.onIntent(ChatIntent.Send)
++        advanceUntilIdle()
++        vm.onIntent(ChatIntent.Summarize)
++        advanceUntilIdle()
++        assertEquals(Summary.Bullets(listOf("2 lines")), vm.state.value.summary)
++        assertTrue(!vm.state.value.summarizing)
++    }
++
++    @Test
++    fun `dismissing the card clears it`() = runTest(dispatcher) {
++        val vm = viewModel()
++        vm.onIntent(ChatIntent.Summarize)
++        advanceUntilIdle()
++        vm.onIntent(ChatIntent.DismissSummary)
++        assertEquals(null, vm.state.value.summary)
++    }
+ }
+diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
+index 376ba55..7edf2d4 100644
+--- a/gradle/libs.versions.toml
++++ b/gradle/libs.versions.toml
+@@ -11,6 +11,9 @@ coroutines = "1.11.0"
+ junit = "4.13.2"
+ # Week 2: ML Kit Smart Reply, bundled model (about 5.7 MB), last updated to 17.0.4 in Aug 2024.
+ mlkitSmartReply = "17.0.4"
++# Week 3: ML Kit GenAI Summarization (Gemini Nano via AICore). Beta, no SLA. Unchanged since its
++# first release; the Oct 26, 2026 ML Kit release notes still list 1.0.0-beta1.
++mlkitGenaiSummarization = "1.0.0-beta1"
+ 
+ [libraries]
+ androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+@@ -30,6 +33,9 @@ kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
+ kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutines" }
+ 
+ mlkit-smart-reply = { group = "com.google.mlkit", name = "smart-reply", version.ref = "mlkitSmartReply" }
++# Week 3: the GenAI APIs return Guava ListenableFuture, so we also need ListenableFuture.await().
++mlkit-genai-summarization = { group = "com.google.mlkit", name = "genai-summarization", version.ref = "mlkitGenaiSummarization" }
++kotlinx-coroutines-guava = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-guava", version.ref = "coroutines" }
+ 
+ junit = { group = "junit", name = "junit", version.ref = "junit" }
+ 
+-- 
+2.43.0
+
+
+From 6d198b0263d32804cdde468c6fcdf10db5b313d8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 7 Nov 2026 00:54:02 +0000
+Subject: [PATCH 2/2] Week 3: article, The Landlord Owns the Bulb.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GqRwXrMvaq189FNZu3A6jo
+---
+ .../week-03-the-landlord-owns-the-bulb.md     | 67 +++++++++++++++++++
+ 1 file changed, 67 insertions(+)
+ create mode 100644 articles/week-03-the-landlord-owns-the-bulb.md
+
+diff --git a/articles/week-03-the-landlord-owns-the-bulb.md b/articles/week-03-the-landlord-owns-the-bulb.md
+new file mode 100644
+index 0000000..0bc6286
+--- /dev/null
++++ b/articles/week-03-the-landlord-owns-the-bulb.md
+@@ -0,0 +1,67 @@
++# The Landlord Owns the Bulb
++
++### Ship the model you own. Queue for the model you borrow.
++
++*AI in Mobile, a weekly learning journey across iOS and Android*
++
++---
++
++Last week, in "The First Bulb Lit the Wrong Side of the Table," the first model into Kuza was a 5.7 MB file inside my APK. This week the first language model arrived, and it did not come inside the APK at all. It came with a landlord.
++
++Sit down. Week three adds a Summarize button: one tap and Gemini Nano reads the thread and hands back three bullets. The artifact is `com.google.mlkit:genai-summarization:1.0.0-beta1`, still beta1 in the October 26, 2026 release notes, and it adds zero bytes to the APK. Gemini Nano lives in AICore, an Android system service, and every app on the phone shares one copy, the way one grandmother cooks for the whole compound. You do not bring a pot. You bring a plate and wait your turn.
++
++The seam is the third of its kind, the first that reads the whole table:
++
++```kotlin
++fun interface Summarizer {
++    suspend fun summarize(transcript: List<Message>): Summary
++}
++```
++
++The model wants the thread as a document, `<name>: <message>` one per line, under 4000 tokens. Here is the turn, and it arrived in the first hour. The SDK offers auto truncation for long input, and it keeps the prefix. The prefix of a chat is "hi." So the gate trims from the head itself and keeps the newest 12000 characters:
++
++```kotlin
++var budget = MAX_CHARS
++val kept = ArrayList<String>(lines.size)
++for (line in lines.asReversed()) {
++    budget -= line.length + 1
++    if (budget < 0) break
++    kept += line
++}
++```
++
++Then the landlord's rules, which are not mine. Inference runs only while the app is in the foreground. Each app has an inference quota (`BUSY` past it) and a daily battery quota. The feature exists only on a published list of phones: Pixel 9, 10 and 11, Galaxy S25 and S26, the new folds, and a roll call of Honor, OnePlus, OPPO, Xiaomi and vivo. No Pixel 8. No Galaxy S24. No emulator. Everywhere else the status check says `UNAVAILABLE`. On a supported phone the first use may download the feature, at a size Google does not publish. The callback tells you the number; the documentation does not.
++
++So the summarizer has five answers, and the screen knows each by name:
++
++```kotlin
++sealed interface Summary {
++    data class Bullets(val lines: List<String>) : Summary
++    data object TooShort : Summary
++    data object NotOnThisPhone : Summary
++    data class Downloading(val bytes: Long) : Summary
++    data class Failed(val reason: String) : Summary
++}
++```
++
++Last week the model explained its silence with a status code. This week the operating system explains it with a queue, a meter, and a guest list. Every outcome has words on the card. None is a spinner.
++
++The tradeoffs, told straight. You get a real language model for free: nothing in the APK, no model to update, no GPU memory to manage, and the thread never leaves the phone. You pay in three currencies. Reach: my mother's phone is not on the list, and neither is yours if it is two years old. Control: the Nano version varies by device, so one thread summarizes differently on a Pixel 9 and a Xiaomi 15, and you cannot pin it. Ownership: a quota you did not set can refuse your feature at the busiest hour of the day. If summarizing is a nice touch, this is the right tool and it costs two dependencies. If summarizing is the product, you do not build the product on a borrowed pot.
++
++**The leadership lens.** Ask one question before the team ships a platform model feature: who can turn it off? With a bundled model, you. With AICore: Google, the OEM, the battery, and the phone's age, in that order. Fine for a feature you can hide behind a status check. Not fine for the feature on the pricing page.
++
++Ship the model you own. Queue for the model you borrow.
++
++*Code: github.com/AliZiwa/kuza, tag `week-03`, commit "Week 3: ML Kit GenAI Summarization of the thread behind a Summarizer seam." Compile verification is on Ali's machine. Next week we buy our own pot: Gemma 4 E2B on LiteRT-LM behind the Replier seam, one line changed in MainActivity, and the price arrives in gigabytes.*
++
++---
++
++**Medium tags:** Artificial Intelligence, Mobile App Development, Android, Kotlin, On Device AI
++
++**LinkedIn opener (two lines before the fold):**
++
++> Week three of building a chat app in public: the first language model arrived, and it added zero bytes to my APK. It also came with a landlord, a meter, and a guest list.
++>
++> My mother's phone is not on the list. Here is what that costs and when it is still the right call.
++
++#AI #MobileDevelopment #Android #Kotlin #OnDeviceAI
+-- 
+2.43.0
+

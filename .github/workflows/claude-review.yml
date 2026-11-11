@@ -1,0 +1,53 @@
+name: Claude review
+
+# Runs the principal-engineer-pr-reviewer skill on every pull request from a branch in this repository.
+# Drafts are skipped until they are marked ready. A new push cancels the review in flight.
+# Forks never see secrets on GitHub, so this only reviews same-repo branches.
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !endsWith(github.event.pull_request.user.login, '[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Full history so the skill can diff against the base branch and read commits.
+          fetch-depth: 0
+
+      # Optional: install the toolchains the skill may use to run the repo's own fast checks.
+      # Uncomment the ones your repo uses. Keep the step cheap; the review should not become CI.
+      # - uses: actions/setup-java@v4
+      #   with: { distribution: temurin, java-version: '21' }
+      # - uses: actions/setup-python@v5
+      #   with: { python-version: '3.12' }
+      # - uses: actions/setup-node@v4
+      #   with: { node-version: '22' }
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: "/principal-engineer-pr-reviewer ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          claude_args: |
+            --max-turns 60
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git fetch:*),Bash(git merge-base:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh api:*),Bash(shellcheck:*),Bash(./gradlew:*),Bash(mvn:*),Bash(npm test:*),Bash(npm run:*),Bash(npx:*),Bash(pytest:*),Bash(python -m pytest:*),Bash(ruff:*),Bash(mypy:*),Bash(go test:*),Bash(go vet:*)"
+            --disallowedTools "Write,Edit,MultiEdit,NotebookEdit,Bash(git push:*),Bash(git commit:*),Bash(git add:*),Bash(git rm:*),WebSearch,WebFetch"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
