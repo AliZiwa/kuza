@@ -2,12 +2,15 @@ package com.kuza.app.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.kuza.app.domain.Author
 import com.kuza.app.domain.Message
 import com.kuza.app.domain.Replier
 import com.kuza.app.domain.ScriptedFriend
 import com.kuza.app.domain.NoSuggestions
 import com.kuza.app.domain.Suggester
+import com.kuza.app.ml.SmartReplySuggester
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -44,6 +47,14 @@ class ChatViewModel(
     private val clock: () -> Long = System::currentTimeMillis,
     private val io: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
+
+    companion object {
+        val Factory = viewModelFactory {
+            initializer {
+                ChatViewModel(replier = ScriptedFriend(), suggester = SmartReplySuggester())
+            }
+        }
+    }
 
     private val _state = MutableStateFlow(ChatState())
     val state: StateFlow<ChatState> = _state

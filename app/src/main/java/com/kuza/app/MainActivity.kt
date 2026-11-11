@@ -5,11 +5,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewmodel.initializer
-import androidx.lifecycle.viewmodel.viewModelFactory
-import com.kuza.app.domain.ScriptedFriend
-import com.kuza.app.ml.SmartReplySuggester
 import com.kuza.app.presentation.ChatScreen
 import com.kuza.app.presentation.ChatViewModel
 import com.kuza.app.presentation.KuzaTheme
@@ -19,11 +14,7 @@ class MainActivity : ComponentActivity() {
     // Week 1: the friend reads from a script. This is the only line that changes in week 4.
     // Week 2: the phone suggests your side of the chat with ML Kit Smart Reply. The friend is unchanged.
     private val viewModel: ChatViewModel by viewModels {
-        viewModelFactory {
-            initializer {
-                ChatViewModel(replier = ScriptedFriend(), suggester = SmartReplySuggester())
-            }
-        }
+        ChatViewModel.Factory
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
