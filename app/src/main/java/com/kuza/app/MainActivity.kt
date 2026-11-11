@@ -19,11 +19,7 @@ class MainActivity : ComponentActivity() {
     // Week 1: the friend reads from a script. This is the only line that changes in week 4.
     // Week 2: the phone suggests your side of the chat with ML Kit Smart Reply. The friend is unchanged.
     private val viewModel: ChatViewModel by viewModels {
-        viewModelFactory {
-            initializer {
-                ChatViewModel(replier = ScriptedFriend(), suggester = SmartReplySuggester())
-            }
-        }
+        ChatViewModel.Factory
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
